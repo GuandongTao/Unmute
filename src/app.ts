@@ -12,6 +12,7 @@ interface Config {
   cleanup_device: string;
   cleanup_model: string;
   ollama_url: string;
+  translate_to_english: boolean;
   auto_paste: boolean;
   max_recording_secs: number;
 }
@@ -27,6 +28,13 @@ const saveBtn = document.getElementById("save-btn")!;
 const saveStatus = document.getElementById("save-status")!;
 
 let currentConfig: Config;
+
+function formatModelLabel(model: string): string {
+  if (model.endsWith(".en")) {
+    return `${model} — English only`;
+  }
+  return `${model} — EN/CN multilingual`;
+}
 
 async function refreshOllamaModels() {
   const selected = cleanupModelSelect.value || currentConfig?.cleanup_model || "";
@@ -60,13 +68,13 @@ function setStatus(status: string) {
 async function loadConfig() {
   currentConfig = await invoke<Config>("get_config");
 
-  // Populate model dropdown
+  // Populate model dropdown with language annotations
   const models = await invoke<string[]>("list_models");
   asrModelSelect.innerHTML = "";
   for (const model of models) {
     const opt = document.createElement("option");
     opt.value = model;
-    opt.textContent = model;
+    opt.textContent = formatModelLabel(model);
     asrModelSelect.appendChild(opt);
   }
   // If current model not in list, add it
@@ -89,6 +97,8 @@ async function saveConfig() {
     ...currentConfig,
     asr_model: asrModelSelect.value,
     asr_device: asrDeviceSelect.value,
+    asr_language: asrModelSelect.value.endsWith(".en") ? "en" : "auto",
+    translate_to_english: cleanupModeSelect.value !== "off",
     cleanup_mode: cleanupModeSelect.value,
     cleanup_model: cleanupModelSelect.value,
   };

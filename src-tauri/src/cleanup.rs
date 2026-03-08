@@ -3,13 +3,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::CleanupMode;
 
+// --- Preserve original language prompts ---
+
 const LIGHT_SYSTEM_PROMPT: &str = "\
 You are a transcript cleanup assistant.\n\
 Clean the text lightly.\n\
 Remove filler words and false starts.\n\
 Fix punctuation and grammar.\n\
 Preserve wording and meaning.\n\
-Keep English and Chinese exactly as used.\n\
+Keep English and Chinese exactly as spoken.\n\
 Do not translate.\n\
 Do not add information.\n\
 Output only the cleaned text.";
@@ -21,10 +23,33 @@ Remove filler words, repetition, and broken fragments.\n\
 Only rewrite sentence structure if necessary for clarity.\n\
 If the original phrasing is already clear, keep it as-is.\n\
 Preserve meaning exactly.\n\
-Keep English and Chinese mixed usage if present.\n\
-Do not translate unless the user explicitly asks.\n\
+Keep English and Chinese mixed usage exactly as spoken.\n\
+Do not translate.\n\
 Do not add new information.\n\
 Output only the cleaned text.";
+
+// --- Translate-to-English prompts ---
+
+const LIGHT_TRANSLATE_PROMPT: &str = "\
+You are a transcript cleanup assistant.\n\
+Clean the text lightly.\n\
+Remove filler words and false starts.\n\
+Fix punctuation and grammar.\n\
+Translate all non-English text to English.\n\
+Preserve meaning.\n\
+Do not add information.\n\
+Output only the cleaned English text.";
+
+const REWRITE_TRANSLATE_PROMPT: &str = "\
+You are a transcript-to-prose assistant.\n\
+Clean up the transcript into clear written English text.\n\
+Remove filler words, repetition, and broken fragments.\n\
+Only rewrite sentence structure if necessary for clarity.\n\
+If the original phrasing is already clear, keep it as-is.\n\
+Translate all non-English text to English.\n\
+Preserve meaning exactly.\n\
+Do not add new information.\n\
+Output only the cleaned English text.";
 
 #[derive(Debug, Serialize)]
 struct OllamaRequest {
@@ -54,7 +79,7 @@ impl CleanupEngine {
         }
     }
 
-    pub async fn cleanup(&self, text: &str, mode: &CleanupMode) -> Result<String, String> {
+    pub async fn cleanup(&self, text: &str, mode: &CleanupMode, translate_to_english: bool) -> Result<String, String> {
         if *mode == CleanupMode::Off {
             return Ok(text.to_string());
         }
@@ -66,10 +91,12 @@ impl CleanupEngine {
             return Ok(text.to_string());
         }
 
-        let system_prompt = match mode {
-            CleanupMode::Light => LIGHT_SYSTEM_PROMPT,
-            CleanupMode::Rewrite => REWRITE_SYSTEM_PROMPT,
-            CleanupMode::Off => unreachable!(),
+        // Rewrite always translates to English; Light respects the toggle
+        let system_prompt = match (mode, translate_to_english) {
+            (CleanupMode::Light, false) => LIGHT_SYSTEM_PROMPT,
+            (CleanupMode::Light, true) => LIGHT_TRANSLATE_PROMPT,
+            (CleanupMode::Rewrite, _) => REWRITE_TRANSLATE_PROMPT,
+            (CleanupMode::Off, _) => unreachable!(),
         };
 
         let start = std::time::Instant::now();

@@ -7,7 +7,7 @@ Local voice typing for Windows. Push-to-talk dictation that runs entirely on you
 1. Press a hotkey to start recording from your microphone
 2. Release to transcribe speech to text using [whisper.cpp](https://github.com/ggml-org/whisper.cpp)
 3. Text is automatically pasted into the active application
-4. Optionally clean up the transcript with a local LLM via [Ollama](https://ollama.com) (removes filler words, fixes grammar)
+4. Optionally clean up the transcript with a local LLM via [Ollama](https://ollama.com) (removes filler words, fixes grammar, translates to English)
 
 ## Hotkeys
 
@@ -22,13 +22,14 @@ Toggle mode auto-stops after 2 minutes.
 
 - **Fully local** — no internet required, no data leaves your machine
 - **Lightweight** — Tauri app (~10MB), minimal resource usage when idle
-- **Floating overlay** — small pill indicator shows recording/processing/idle state with timing
+- **Multilingual** — supports English, Chinese, and mixed EN/CN dictation via `large-v3-turbo` model with auto-detection
+- **Floating overlay** — pill indicator shows CPU/GPU device and LLM status at idle, recording/processing state with timing after transcription
 - **ASR CPU/GPU toggle** — run whisper.cpp on CPU or GPU (NVIDIA CUDA); switchable from the GUI
 - **Automatic GPU-to-CPU fallback** — if the CUDA build fails, ASR retries on CPU automatically
-- **LLM cleanup** — optional transcript cleanup via Ollama (light or rewrite modes)
+- **LLM cleanup with translation** — optional transcript cleanup via Ollama (light or rewrite modes); when enabled, non-English speech is automatically translated to English
 - **Clipboard-safe** — saves and restores your clipboard content (including images) after pasting
 - **Auto-starts Ollama** — no need to manually manage the Ollama service
-- **Settings GUI** — change ASR model/device, cleanup mode, and cleanup model from the app
+- **Settings GUI** — change ASR model, device, cleanup mode, and cleanup model from the app
 
 ## Resource usage
 
@@ -47,7 +48,9 @@ Toggle mode auto-stops after 2 minutes.
 
 ### For ASR (required)
 - [whisper.cpp](https://github.com/ggml-org/whisper.cpp/releases) CPU binary (downloaded automatically by setup script)
-- A GGML whisper model (downloaded automatically — default: `small.en`, ~466MB)
+- A GGML whisper model (downloaded automatically)
+  - **`large-v3-turbo`** (~1.6GB) — multilingual, supports EN/CN mixed input (default)
+  - **`small.en`** (~466MB) — English-only, faster on CPU
 
 ### For GPU-accelerated ASR (optional)
 - **NVIDIA GPU** with CUDA support (GTX 1060+, RTX series, etc.)
@@ -68,12 +71,23 @@ powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
 # Optional flags:
 #   -SkipCuda       Skip CUDA build download (AMD GPU or no NVIDIA GPU)
 #   -SkipOllama     Skip Ollama model pull
-#   -ModelSize      Change ASR model (default: small.en)
+#   -ModelSize      Change ASR model (default: large-v3-turbo)
+#                   Use "small.en" for fast English-only
 
 # Optional: install Ollama for LLM cleanup
 # Download from: https://ollama.com/download
 # Then: ollama pull qwen2.5:3b
 ```
+
+### ASR models
+
+| Model | Size | Languages | Best for |
+|-------|------|-----------|----------|
+| `large-v3-turbo` | ~1.6GB | Multilingual (EN/CN/...) | Mixed-language dictation, best accuracy |
+| `small.en` | ~466MB | English only | Fast English-only, lower resource usage |
+| `base.en` | ~142MB | English only | Fastest, lowest accuracy |
+
+The model is selected in the GUI dropdown, which shows language support for each model.
 
 ### GPU compatibility
 
@@ -84,6 +98,14 @@ powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
 | **No GPU** | CPU only | CPU (slow) or disable cleanup |
 
 If ASR is set to GPU mode but the CUDA build fails (wrong GPU, missing driver, etc.), it automatically falls back to CPU. The GUI will show "CPU*" to indicate fallback occurred.
+
+### Cleanup modes and translation
+
+| Cleanup Mode | Output language | Behavior |
+|---|---|---|
+| **Off** | Original (mixed EN/CN) | Raw whisper output, no LLM processing |
+| **Light** | English | Fix punctuation/fillers, translate to English |
+| **Rewrite** | English | Restructure for clarity, translate to English |
 
 ## Development
 
@@ -108,8 +130,8 @@ Built with [Tauri v2](https://tauri.app) (Rust backend + WebView frontend).
 |--------|---------|
 | `hotkey.rs` | Low-level keyboard hook (`WH_KEYBOARD_LL`) for modifier-only hotkeys with left/right key distinction |
 | `audio.rs` | Microphone capture via cpal, resamples to 16kHz mono WAV |
-| `asr.rs` | whisper.cpp subprocess wrapper with GPU-to-CPU fallback |
-| `cleanup.rs` | Ollama HTTP client for transcript cleanup (light/rewrite modes) |
+| `asr.rs` | whisper.cpp subprocess wrapper with GPU-to-CPU fallback and optional `--translate` |
+| `cleanup.rs` | Ollama HTTP client for transcript cleanup with language-aware prompts |
 | `paste.rs` | Clipboard save/restore + simulated Ctrl+V paste |
 | `config.rs` | JSON config at `%APPDATA%/unmute/config.json` |
 | `logger.rs` | Structured JSON logs at `%LOCALAPPDATA%/unmute/logs/` |
@@ -120,15 +142,16 @@ Config lives at `%APPDATA%/unmute/config.json`:
 
 ```json
 {
-  "asr_model": "small.en",
-  "asr_language": "en",
-  "asr_device": "cpu",
+  "asr_model": "large-v3-turbo",
+  "asr_language": "auto",
+  "asr_device": "gpu",
   "whisper_path": "C:\\Users\\...\\unmute\\bin\\whisper-cli.exe",
   "whisper_gpu_path": "C:\\Users\\...\\unmute\\bin-gpu\\whisper-cli.exe",
   "models_dir": "C:\\Users\\...\\unmute\\models",
-  "cleanup_mode": "off",
+  "cleanup_mode": "light",
   "cleanup_model": "qwen2.5:3b",
   "ollama_url": "http://localhost:11434",
+  "translate_to_english": true,
   "auto_paste": true,
   "max_recording_secs": 120
 }
@@ -136,8 +159,11 @@ Config lives at `%APPDATA%/unmute/config.json`:
 
 | Key | Values | Description |
 |-----|--------|-------------|
+| `asr_model` | model name | Whisper model (`large-v3-turbo` for multilingual, `small.en` for English-only) |
+| `asr_language` | `auto`, `en` | Auto-derived from model; `auto` for multilingual, `en` for `.en` models |
 | `asr_device` | `cpu`, `gpu` | Which device to run whisper.cpp on |
-| `cleanup_mode` | `off`, `light`, `rewrite` | `light` = fix punctuation/fillers, `rewrite` = restructure for clarity |
+| `cleanup_mode` | `off`, `light`, `rewrite` | `off` = raw output, `light` = fix punctuation/fillers, `rewrite` = restructure for clarity |
+| `translate_to_english` | `true`, `false` | Auto-set based on cleanup mode; when cleanup is on, translates to English |
 | `whisper_path` | path | CPU whisper-cli.exe location |
 | `whisper_gpu_path` | path | CUDA whisper-cli.exe location (leave empty if no NVIDIA GPU) |
 

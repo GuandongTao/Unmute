@@ -29,15 +29,17 @@ pub struct WhisperEngine {
     fallback_binary_path: Option<String>,
     model_path: String,
     language: String,
+    translate: bool,
 }
 
 impl WhisperEngine {
-    pub fn new(binary_path: &str, model_path: &str, language: &str, fallback_binary_path: Option<&str>) -> Self {
+    pub fn new(binary_path: &str, model_path: &str, language: &str, fallback_binary_path: Option<&str>, translate: bool) -> Self {
         Self {
             binary_path: binary_path.to_string(),
             fallback_binary_path: fallback_binary_path.map(|s| s.to_string()),
             model_path: model_path.to_string(),
             language: language.to_string(),
+            translate,
         }
     }
 
@@ -121,6 +123,10 @@ impl WhisperEngine {
             .arg("--no-timestamps")
             .arg("-l").arg(&self.language)
             .arg("--no-prints");
+
+        if self.translate {
+            cmd.arg("--translate");
+        }
 
         let output = cmd.output().map_err(|e| format!("Failed to run whisper: {}", e))?;
 

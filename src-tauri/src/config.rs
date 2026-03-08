@@ -14,6 +14,7 @@ pub struct Config {
     pub cleanup_device: CleanupDevice,
     pub cleanup_model: String,
     pub ollama_url: String,
+    pub translate_to_english: bool,
     pub auto_paste: bool,
     pub max_recording_secs: u64,
 }
@@ -53,6 +54,7 @@ impl Default for Config {
             cleanup_device: CleanupDevice::Gpu,
             cleanup_model: "qwen3.5:0.8b".to_string(),
             ollama_url: "http://localhost:11434".to_string(),
+            translate_to_english: false,
             auto_paste: true,
             max_recording_secs: 120,
         }

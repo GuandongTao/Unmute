@@ -7,7 +7,7 @@ param(
     [switch]$SkipModel,
     [switch]$SkipOllama,
     [switch]$SkipCuda,
-    [string]$ModelSize = "small.en"
+    [string]$ModelSize = "large-v3-turbo"
 )
 
 $ErrorActionPreference = "Stop"
@@ -183,7 +183,7 @@ if (Test-Path $configPath) {
 } else {
     $config = @{
         asr_model = $ModelSize
-        asr_language = "en"
+        asr_language = "auto"
         asr_device = $defaultDevice
         whisper_path = $whisperExePath
         whisper_gpu_path = if ($cudaInstalled) { $whisperGpuExePath } else { "" }

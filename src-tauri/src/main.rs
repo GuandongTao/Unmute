@@ -40,11 +40,18 @@ fn get_config(state: tauri::State<'_, Arc<AppState>>) -> Config {
 
 #[tauri::command]
 fn update_config(
+    app: AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
     new_config: Config,
 ) -> Result<(), String> {
     new_config.save()?;
+    let device_label = match new_config.asr_device {
+        config::AsrDevice::Gpu => "GPU",
+        config::AsrDevice::Cpu => "CPU",
+    };
+    let cleanup_on = new_config.cleanup_mode != config::CleanupMode::Off;
     *state.config.lock().unwrap() = new_config;
+    set_overlay_idle_label(&app, device_label, cleanup_on);
     Ok(())
 }
 
@@ -133,6 +140,22 @@ async fn list_ollama_models(state: tauri::State<'_, Arc<AppState>>) -> Result<Ve
 
     models.sort();
     Ok(models)
+}
+
+/// Update the idle pill label showing device and cleanup status.
+fn set_overlay_idle_label(app: &AppHandle, device: &str, cleanup_on: bool) {
+    if let Some(overlay) = app.get_webview_window("overlay") {
+        let label = if cleanup_on {
+            format!("{} LLM", device.to_uppercase())
+        } else {
+            device.to_uppercase()
+        };
+        let js = format!(
+            "document.getElementById('device-label').textContent = '{}';",
+            label
+        );
+        overlay.eval(&js).ok();
+    }
 }
 
 /// Update the overlay pill color by directly evaluating JS in the overlay webview.
@@ -255,7 +278,9 @@ async fn process_recording(state: &Arc<AppState>) -> Result<ProcessResult, Strin
         let cpu = asr::WhisperEngine::resolve_binary(&config.whisper_path)?;
         (cpu, None, "CPU")
     };
-    let engine = asr::WhisperEngine::new(&primary_binary, &model, &config.asr_language, fallback_binary.as_deref());
+    // Rewrite mode always translates to English; Light mode respects the toggle
+    let should_translate = config.translate_to_english || config.cleanup_mode == config::CleanupMode::Rewrite;
+    let engine = asr::WhisperEngine::new(&primary_binary, &model, &config.asr_language, fallback_binary.as_deref(), should_translate);
 
     let transcript = engine.transcribe(&wav_path_str, device_label)?;
 
@@ -275,7 +300,7 @@ async fn process_recording(state: &Arc<AppState>) -> Result<ProcessResult, Strin
 
         let start = std::time::Instant::now();
         match cleanup_engine
-            .cleanup(&transcript.text, &config.cleanup_mode)
+            .cleanup(&transcript.text, &config.cleanup_mode, config.translate_to_english)
             .await
         {
             Ok(cleaned_text) => {
@@ -460,6 +485,21 @@ fn main() {
             .build()?;
 
             overlay.set_ignore_cursor_events(true)?;
+
+            // Show device + cleanup label on pill after overlay loads
+            let handle_for_overlay = handle.clone();
+            let state_for_overlay = state.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                let config = state_for_overlay.config.lock().unwrap();
+                let device_label = match config.asr_device {
+                    config::AsrDevice::Gpu => "GPU",
+                    config::AsrDevice::Cpu => "CPU",
+                };
+                let cleanup_on = config.cleanup_mode != config::CleanupMode::Off;
+                drop(config);
+                set_overlay_idle_label(&handle_for_overlay, device_label, cleanup_on);
+            });
 
             // Install low-level keyboard hook for hotkeys
             let state_for_hook = state.clone();
