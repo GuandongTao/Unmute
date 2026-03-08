@@ -28,6 +28,16 @@ Toggle mode auto-stops after 2 minutes.
 - **Auto-starts Ollama** — no need to manually manage the Ollama service
 - **Settings GUI** — change ASR model, cleanup mode, and cleanup model from the app
 
+## Resource usage
+
+| Component | Runs on | Impact | When |
+|-----------|---------|--------|------|
+| **ASR (whisper.cpp)** | CPU only | ~4-6 cores for 3-4s per transcription | Only during transcription |
+| **LLM cleanup (Ollama)** | GPU (default) | ~2GB VRAM, sub-second inference | Only during cleanup |
+| **Idle** | — | Near-zero CPU/RAM | Always |
+
+**Designed to coexist with GPU workloads.** ASR runs entirely on CPU, so it won't interfere with GPU training, gaming, or rendering. LLM cleanup uses the GPU briefly but is optional — disable it (`cleanup_mode: off`) if your GPU is fully occupied.
+
 ## Requirements
 
 - Windows 10/11
