@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Unmute</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <div id="status-section">
+      <div id="status-indicator" class="idle"></div>
+      <span id="status-text">Idle</span>
+    </div>
+
+    <div id="transcript-section">
+      <h3>Latest Transcript</h3>
+      <div id="raw-transcript" class="transcript-box">&mdash;</div>
+    </div>
+
+    <div id="settings-section">
+      <h3>Settings</h3>
+
+      <div class="setting-row">
+        <label for="asr-model-select">ASR Model</label>
+        <select id="asr-model-select"></select>
+      </div>
+
+      <div class="setting-row">
+        <label for="cleanup-mode-select">Cleanup Mode</label>
+        <select id="cleanup-mode-select">
+          <option value="off">Off</option>
+          <option value="light">Light</option>
+          <option value="rewrite">Rewrite</option>
+        </select>
+      </div>
+
+      <div class="setting-row">
+        <label for="cleanup-model-select">Cleanup Model</label>
+        <select id="cleanup-model-select"></select>
+      </div>
+
+
+      <button id="save-btn">Save Settings</button>
+      <span id="save-status"></span>
+    </div>
+
+    <div id="info-section">
+      <div class="info-row"><span>Hold:</span> <span>Left Alt + Right Ctrl</span></div>
+      <div class="info-row"><span>Toggle:</span> <span>Left Alt + Right Ctrl + Right Shift</span></div>
+    </div>
+  </div>
+
+  <script type="module" src="app.ts"></script>
+</body>
+</html>
