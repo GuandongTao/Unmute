@@ -21,18 +21,21 @@ pub struct Transcript {
     pub text: String,
     pub language: Option<String>,
     pub duration_ms: u64,
+    pub device_used: String,
 }
 
 pub struct WhisperEngine {
     binary_path: String,
+    fallback_binary_path: Option<String>,
     model_path: String,
     language: String,
 }
 
 impl WhisperEngine {
-    pub fn new(binary_path: &str, model_path: &str, language: &str) -> Self {
+    pub fn new(binary_path: &str, model_path: &str, language: &str, fallback_binary_path: Option<&str>) -> Self {
         Self {
             binary_path: binary_path.to_string(),
+            fallback_binary_path: fallback_binary_path.map(|s| s.to_string()),
             model_path: model_path.to_string(),
             language: language.to_string(),
         }
@@ -105,22 +108,14 @@ impl WhisperEngine {
         ))
     }
 
-    pub fn transcribe(&self, audio_path: &str) -> Result<Transcript, String> {
+    fn run_whisper(&self, binary_path: &str, audio_path: &str) -> Result<(String, u64), String> {
         let start = std::time::Instant::now();
 
-        if !Path::new(&self.binary_path).exists() && !self.binary_path.contains('/') && !self.binary_path.contains('\\') {
-            // It might be in PATH, try using it directly
-        } else if !Path::new(&self.binary_path).exists() {
-            return Err(format!("Whisper binary not found: {}", self.binary_path));
+        if !Path::new(binary_path).exists() && binary_path.contains('\\') || binary_path.contains('/') {
+            return Err(format!("Whisper binary not found: {}", binary_path));
         }
 
-        if !Path::new(&self.model_path).exists() {
-            return Err(format!("Whisper model not found: {}", self.model_path));
-        }
-
-        log::info!("Transcribing {:?} with model {}", audio_path, self.model_path);
-
-        let mut cmd = Command::new(&self.binary_path);
+        let mut cmd = Command::new(binary_path);
         cmd.arg("-m").arg(&self.model_path)
             .arg("-f").arg(audio_path)
             .arg("--no-timestamps")
@@ -135,16 +130,51 @@ impl WhisperEngine {
         }
 
         let raw_text = String::from_utf8_lossy(&output.stdout).to_string();
-        // Strip whisper special tokens like <|endoftext|>, <|startoftime|>, etc.
         let text = strip_special_tokens(raw_text.trim());
-
         let duration_ms = start.elapsed().as_millis() as u64;
-        log::info!("ASR completed in {}ms: {:?}", duration_ms, text);
 
-        Ok(Transcript {
-            text,
-            language: Some(self.language.clone()),
-            duration_ms,
-        })
+        Ok((text, duration_ms))
+    }
+
+    pub fn transcribe(&self, audio_path: &str, device_label: &str) -> Result<Transcript, String> {
+        if !Path::new(&self.model_path).exists() {
+            return Err(format!("Whisper model not found: {}", self.model_path));
+        }
+
+        log::info!("Transcribing {:?} with model {} ({})", audio_path, self.model_path, device_label);
+
+        // Try primary binary
+        match self.run_whisper(&self.binary_path, audio_path) {
+            Ok((text, duration_ms)) => {
+                log::info!("ASR completed in {}ms ({}): {:?}", duration_ms, device_label, text);
+                return Ok(Transcript {
+                    text,
+                    language: Some(self.language.clone()),
+                    duration_ms,
+                    device_used: device_label.to_string(),
+                });
+            }
+            Err(e) => {
+                // If we have a fallback, try it
+                if let Some(ref fallback) = self.fallback_binary_path {
+                    log::warn!("{} ASR failed ({}), falling back to CPU", device_label, e);
+                    match self.run_whisper(fallback, audio_path) {
+                        Ok((text, duration_ms)) => {
+                            log::info!("ASR completed in {}ms (CPU fallback): {:?}", duration_ms, text);
+                            return Ok(Transcript {
+                                text,
+                                language: Some(self.language.clone()),
+                                duration_ms,
+                                device_used: "CPU*".to_string(),
+                            });
+                        }
+                        Err(e2) => {
+                            return Err(format!("ASR failed on both GPU and CPU.\nGPU: {}\nCPU: {}", e, e2));
+                        }
+                    }
+                }
+                return Err(e);
+            }
+        }
     }
 }

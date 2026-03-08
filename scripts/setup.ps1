@@ -1,12 +1,12 @@
 # Unmute Setup Script
-# Downloads whisper.cpp, ASR model, and optionally sets up Ollama
+# Downloads whisper.cpp (CPU + CUDA), ASR model, and optionally sets up Ollama
 # Run: powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
 
 param(
     [switch]$SkipWhisper,
     [switch]$SkipModel,
     [switch]$SkipOllama,
-    [switch]$CudaBuild,
+    [switch]$SkipCuda,
     [string]$ModelSize = "small.en"
 )
 
@@ -14,6 +14,7 @@ $ErrorActionPreference = "Stop"
 
 $AppDir = Join-Path $env:LOCALAPPDATA "unmute"
 $BinDir = Join-Path $AppDir "bin"
+$GpuBinDir = Join-Path $AppDir "bin-gpu"
 $ModelsDir = Join-Path $AppDir "models"
 $WhisperVersion = "v1.8.3"
 $WhisperRepo = "ggml-org/whisper.cpp"
@@ -26,67 +27,77 @@ Write-Host ""
 
 # Create directories
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
+New-Item -ItemType Directory -Force -Path $GpuBinDir | Out-Null
 New-Item -ItemType Directory -Force -Path $ModelsDir | Out-Null
 
-# --- Step 1: Download whisper.cpp ---
-if (-not $SkipWhisper) {
-    $whisperExe = Join-Path $BinDir "whisper-cli.exe"
+# --- Helper function to download and extract whisper build ---
+function Install-WhisperBuild {
+    param(
+        [string]$ZipName,
+        [string]$DestDir,
+        [string]$Label
+    )
+    $exePath = Join-Path $DestDir "whisper-cli.exe"
+    if (Test-Path $exePath) {
+        Write-Host "[whisper.cpp $Label] Already installed at $exePath" -ForegroundColor Green
+        return $true
+    }
 
-    if (Test-Path $whisperExe) {
-        Write-Host "[whisper.cpp] Already installed at $whisperExe" -ForegroundColor Green
+    $downloadUrl = "https://github.com/$WhisperRepo/releases/download/$WhisperVersion/$ZipName"
+    $zipPath = Join-Path $env:TEMP "whisper-$Label.zip"
+
+    Write-Host "[whisper.cpp $Label] Downloading $ZipName..." -ForegroundColor Yellow
+    Write-Host "  URL: $downloadUrl"
+
+    try {
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $zipPath -UseBasicParsing
+    } catch {
+        Write-Host "[whisper.cpp $Label] Download failed: $_" -ForegroundColor Red
+        return $false
+    }
+
+    Write-Host "[whisper.cpp $Label] Extracting..." -ForegroundColor Yellow
+    $extractDir = Join-Path $env:TEMP "whisper-extract-$Label"
+    if (Test-Path $extractDir) { Remove-Item -Recurse -Force $extractDir }
+    Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+
+    $exeFiles = Get-ChildItem -Path $extractDir -Recurse -Filter "whisper-cli.exe"
+    if ($exeFiles.Count -eq 0) {
+        $exeFiles = Get-ChildItem -Path $extractDir -Recurse -Filter "main.exe"
+    }
+
+    if ($exeFiles.Count -gt 0) {
+        Copy-Item $exeFiles[0].FullName -Destination $exePath -Force
+        # Copy DLLs (needed for CUDA builds)
+        $dlls = Get-ChildItem -Path $exeFiles[0].DirectoryName -Filter "*.dll"
+        foreach ($dll in $dlls) {
+            Copy-Item $dll.FullName -Destination $DestDir -Force
+        }
+        Write-Host "[whisper.cpp $Label] Installed to $exePath" -ForegroundColor Green
     } else {
-        if ($CudaBuild) {
-            $zipName = "whisper-cublas-12.4.0-bin-x64.zip"
-        } else {
-            $zipName = "whisper-bin-x64.zip"
-        }
+        Write-Host "[whisper.cpp $Label] Could not find executable in archive." -ForegroundColor Red
+    }
 
-        $downloadUrl = "https://github.com/$WhisperRepo/releases/download/$WhisperVersion/$zipName"
-        $zipPath = Join-Path $env:TEMP "whisper-cpp.zip"
+    Remove-Item -Force $zipPath -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue
+    return (Test-Path $exePath)
+}
 
-        Write-Host "[whisper.cpp] Downloading $zipName..." -ForegroundColor Yellow
-        Write-Host "  URL: $downloadUrl"
+# --- Step 1: Download whisper.cpp CPU build ---
+$cpuInstalled = $false
+if (-not $SkipWhisper) {
+    $cpuInstalled = Install-WhisperBuild -ZipName "whisper-bin-x64.zip" -DestDir $BinDir -Label "CPU"
+}
 
-        try {
-            Invoke-WebRequest -Uri $downloadUrl -OutFile $zipPath -UseBasicParsing
-        } catch {
-            Write-Host "[whisper.cpp] Download failed. Trying without version..." -ForegroundColor Red
-            Write-Host "  Please download manually from: https://github.com/$WhisperRepo/releases" -ForegroundColor Red
-            Write-Host "  Extract whisper-cli.exe to: $BinDir" -ForegroundColor Red
-            $SkipWhisper = $true
-        }
-
-        if (-not $SkipWhisper) {
-            Write-Host "[whisper.cpp] Extracting..." -ForegroundColor Yellow
-            $extractDir = Join-Path $env:TEMP "whisper-extract"
-            if (Test-Path $extractDir) { Remove-Item -Recurse -Force $extractDir }
-            Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
-
-            # Find and copy the main executable
-            $exeFiles = Get-ChildItem -Path $extractDir -Recurse -Filter "whisper-cli.exe"
-            if ($exeFiles.Count -eq 0) {
-                # Older versions may name it differently
-                $exeFiles = Get-ChildItem -Path $extractDir -Recurse -Filter "main.exe"
-            }
-
-            if ($exeFiles.Count -gt 0) {
-                Copy-Item $exeFiles[0].FullName -Destination $whisperExe -Force
-                # Also copy any DLLs (needed for CUDA builds)
-                $dlls = Get-ChildItem -Path $exeFiles[0].DirectoryName -Filter "*.dll"
-                foreach ($dll in $dlls) {
-                    Copy-Item $dll.FullName -Destination $BinDir -Force
-                }
-                Write-Host "[whisper.cpp] Installed to $whisperExe" -ForegroundColor Green
-            } else {
-                Write-Host "[whisper.cpp] Could not find executable in archive." -ForegroundColor Red
-                Write-Host "  Contents:" -ForegroundColor Red
-                Get-ChildItem -Path $extractDir -Recurse | ForEach-Object { Write-Host "    $($_.FullName)" }
-            }
-
-            # Cleanup
-            Remove-Item -Force $zipPath -ErrorAction SilentlyContinue
-            Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue
-        }
+# --- Step 1b: Download whisper.cpp CUDA build (optional) ---
+$cudaInstalled = $false
+if (-not $SkipWhisper -and -not $SkipCuda) {
+    Write-Host ""
+    Write-Host "[whisper.cpp CUDA] Attempting CUDA/GPU build download..." -ForegroundColor Yellow
+    Write-Host "  Note: Requires NVIDIA GPU with CUDA support. AMD GPUs are not supported." -ForegroundColor DarkGray
+    $cudaInstalled = Install-WhisperBuild -ZipName "whisper-cublas-12.4.0-bin-x64.zip" -DestDir $GpuBinDir -Label "CUDA"
+    if (-not $cudaInstalled) {
+        Write-Host "[whisper.cpp CUDA] CUDA build not available. ASR will use CPU only." -ForegroundColor Yellow
     }
 }
 
@@ -105,7 +116,6 @@ if (-not $SkipModel) {
         Write-Host "  This may take a few minutes depending on your connection."
 
         try {
-            # Use BITS for large file download with progress
             $progressPreference = 'Continue'
             Invoke-WebRequest -Uri $modelUrl -OutFile $modelPath -UseBasicParsing
 
@@ -125,19 +135,17 @@ if (-not $SkipOllama) {
 
     if ($ollamaCmd) {
         Write-Host "[Ollama] Found at $($ollamaCmd.Source)" -ForegroundColor Green
-
-        # Check if model is pulled
-        Write-Host "[Ollama] Pulling qwen3.5:0.8b (if not already present)..." -ForegroundColor Yellow
+        Write-Host "[Ollama] Pulling qwen2.5:3b (if not already present)..." -ForegroundColor Yellow
         try {
-            & ollama pull qwen3.5:0.8b
-            Write-Host "[Ollama] Model qwen3.5:0.8b ready" -ForegroundColor Green
+            & ollama pull qwen2.5:3b
+            Write-Host "[Ollama] Model qwen2.5:3b ready" -ForegroundColor Green
         } catch {
             Write-Host "[Ollama] Failed to pull model: $_" -ForegroundColor Red
         }
     } else {
         Write-Host "[Ollama] Not installed (optional - needed only for text cleanup)" -ForegroundColor Yellow
         Write-Host "  Install from: https://ollama.com/download" -ForegroundColor Yellow
-        Write-Host "  Then run: ollama pull qwen3.5:0.8b" -ForegroundColor Yellow
+        Write-Host "  Then run: ollama pull qwen2.5:3b" -ForegroundColor Yellow
     }
 }
 
@@ -148,13 +156,23 @@ $configPath = Join-Path $configDir "config.json"
 New-Item -ItemType Directory -Force -Path $configDir | Out-Null
 
 $whisperExePath = Join-Path $BinDir "whisper-cli.exe"
+$whisperGpuExePath = Join-Path $GpuBinDir "whisper-cli.exe"
+$defaultDevice = if ($cudaInstalled) { "gpu" } else { "cpu" }
 
 if (Test-Path $configPath) {
-    # Update existing config with paths
     $config = Get-Content $configPath | ConvertFrom-Json
 
     if ([string]::IsNullOrEmpty($config.whisper_path) -or -not (Test-Path $config.whisper_path)) {
         $config.whisper_path = $whisperExePath
+    }
+    if (-not (Get-Member -InputObject $config -Name "whisper_gpu_path" -MemberType Properties)) {
+        $config | Add-Member -NotePropertyName "whisper_gpu_path" -NotePropertyValue ""
+    }
+    if ($cudaInstalled -and ([string]::IsNullOrEmpty($config.whisper_gpu_path) -or -not (Test-Path $config.whisper_gpu_path))) {
+        $config.whisper_gpu_path = $whisperGpuExePath
+    }
+    if (-not (Get-Member -InputObject $config -Name "asr_device" -MemberType Properties)) {
+        $config | Add-Member -NotePropertyName "asr_device" -NotePropertyValue $defaultDevice
     }
     if ([string]::IsNullOrEmpty($config.models_dir) -or -not (Test-Path $config.models_dir)) {
         $config.models_dir = $ModelsDir
@@ -163,17 +181,16 @@ if (Test-Path $configPath) {
     $config | ConvertTo-Json -Depth 10 | Set-Content $configPath
     Write-Host "[Config] Updated $configPath" -ForegroundColor Green
 } else {
-    # Create new config
     $config = @{
-        hotkey_hold = "Alt+Control"
-        hotkey_toggle = "Alt+Shift+Control"
         asr_model = $ModelSize
         asr_language = "en"
+        asr_device = $defaultDevice
         whisper_path = $whisperExePath
+        whisper_gpu_path = if ($cudaInstalled) { $whisperGpuExePath } else { "" }
         models_dir = $ModelsDir
         cleanup_mode = "off"
         cleanup_device = "gpu"
-        cleanup_model = "qwen3.5:0.8b"
+        cleanup_model = "qwen2.5:3b"
         ollama_url = "http://localhost:11434"
         auto_paste = $true
         max_recording_secs = 120
@@ -188,16 +205,18 @@ Write-Host ""
 Write-Host "=== Setup Complete ===" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Paths:" -ForegroundColor White
-Write-Host "  whisper-cli:  $whisperExePath"
-Write-Host "  Models dir:   $ModelsDir"
-Write-Host "  Config:       $configPath"
-Write-Host "  Logs:         $(Join-Path $AppDir 'logs')"
+Write-Host "  whisper-cli (CPU):  $whisperExePath"
+if ($cudaInstalled) {
+    Write-Host "  whisper-cli (GPU):  $whisperGpuExePath"
+}
+Write-Host "  Models dir:         $ModelsDir"
+Write-Host "  Config:             $configPath"
 Write-Host ""
 
 $ready = $true
 
 if (-not (Test-Path $whisperExePath)) {
-    Write-Host "[!] whisper-cli.exe not found - ASR will not work" -ForegroundColor Red
+    Write-Host "[!] whisper-cli.exe (CPU) not found - ASR will not work" -ForegroundColor Red
     $ready = $false
 }
 
@@ -209,6 +228,11 @@ if (-not (Test-Path $modelPath)) {
 
 if ($ready) {
     Write-Host "Ready to run Unmute!" -ForegroundColor Green
+    if ($cudaInstalled) {
+        Write-Host "  GPU acceleration enabled (NVIDIA CUDA)" -ForegroundColor Green
+    } else {
+        Write-Host "  Running in CPU-only mode" -ForegroundColor Yellow
+    }
     Write-Host "  Run the app or use: npx tauri dev" -ForegroundColor White
 } else {
     Write-Host "Some components are missing. See errors above." -ForegroundColor Yellow

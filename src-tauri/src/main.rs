@@ -154,14 +154,14 @@ fn set_overlay_status(app: &AppHandle, status: &str) {
 }
 
 /// Show timing on the pill after processing completes, then fade back to idle.
-fn set_overlay_done(app: &AppHandle, asr_ms: u64, cleanup_ms: Option<u64>) {
+fn set_overlay_done(app: &AppHandle, asr_device: &str, asr_ms: u64, cleanup_ms: Option<u64>) {
     if let Some(overlay) = app.get_webview_window("overlay") {
         let asr_str = format!("{:.1}s", asr_ms as f64 / 1000.0);
         let llm_str = match cleanup_ms {
             Some(ms) => format!("{:.1}s", ms as f64 / 1000.0),
             None => "\u{2014}".to_string(), // em dash
         };
-        let label = format!("ASR {} | LLM {}", asr_str, llm_str);
+        let label = format!("{} ASR {} | LLM {}", asr_device, asr_str, llm_str);
         let js = format!(
             "document.getElementById('pill').className = 'done'; \
              document.getElementById('timing').textContent = '{}'; \
@@ -220,7 +220,7 @@ fn stop_recording_and_process(state: Arc<AppState>, app: AppHandle) {
             Ok(pr) => {
                 app.emit("transcription-result", &pr).ok();
                 app.emit("recording-status", "idle").ok();
-                set_overlay_done(&app, pr.asr_ms, pr.cleanup_ms);
+                set_overlay_done(&app, &pr.asr_device, pr.asr_ms, pr.cleanup_ms);
             }
             Err(e) => {
                 log::error!("Processing failed: {}", e);
@@ -234,6 +234,7 @@ fn stop_recording_and_process(state: Arc<AppState>, app: AppHandle) {
 #[derive(serde::Serialize, Clone)]
 struct ProcessResult {
     text: String,
+    asr_device: String,
     asr_ms: u64,
     cleanup_ms: Option<u64>,
 }
@@ -244,12 +245,19 @@ async fn process_recording(state: &Arc<AppState>) -> Result<ProcessResult, Strin
     let wav_path_str = wav_path.to_string_lossy().to_string();
     let config = state.config.lock().unwrap().clone();
 
-    // Run ASR
-    let binary = asr::WhisperEngine::resolve_binary(&config.whisper_path)?;
+    // Run ASR — pick binary based on asr_device setting, with CPU fallback
     let model = asr::WhisperEngine::resolve_model(&config.models_dir, &config.asr_model)?;
-    let engine = asr::WhisperEngine::new(&binary, &model, &config.asr_language);
+    let (primary_binary, fallback_binary, device_label) = if config.asr_device == config::AsrDevice::Gpu && !config.whisper_gpu_path.is_empty() {
+        let gpu = asr::WhisperEngine::resolve_binary(&config.whisper_gpu_path)?;
+        let cpu = asr::WhisperEngine::resolve_binary(&config.whisper_path).ok();
+        (gpu, cpu, "GPU")
+    } else {
+        let cpu = asr::WhisperEngine::resolve_binary(&config.whisper_path)?;
+        (cpu, None, "CPU")
+    };
+    let engine = asr::WhisperEngine::new(&primary_binary, &model, &config.asr_language, fallback_binary.as_deref());
 
-    let transcript = engine.transcribe(&wav_path_str)?;
+    let transcript = engine.transcribe(&wav_path_str, device_label)?;
 
     if transcript.text.is_empty() {
         std::fs::remove_file(&wav_path).ok();
@@ -318,6 +326,7 @@ async fn process_recording(state: &Arc<AppState>) -> Result<ProcessResult, Strin
 
     Ok(ProcessResult {
         text: final_text,
+        asr_device: transcript.device_used.clone(),
         asr_ms: transcript.duration_ms,
         cleanup_ms: cleanup_latency,
     })

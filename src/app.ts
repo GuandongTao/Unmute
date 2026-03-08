@@ -4,7 +4,9 @@ import { listen } from "@tauri-apps/api/event";
 interface Config {
   asr_model: string;
   asr_language: string;
+  asr_device: string;
   whisper_path: string;
+  whisper_gpu_path: string;
   models_dir: string;
   cleanup_mode: string;
   cleanup_device: string;
@@ -18,6 +20,7 @@ const statusIndicator = document.getElementById("status-indicator")!;
 const statusText = document.getElementById("status-text")!;
 const rawTranscript = document.getElementById("raw-transcript")!;
 const asrModelSelect = document.getElementById("asr-model-select") as HTMLSelectElement;
+const asrDeviceSelect = document.getElementById("asr-device-select") as HTMLSelectElement;
 const cleanupModeSelect = document.getElementById("cleanup-mode-select") as HTMLSelectElement;
 const cleanupModelSelect = document.getElementById("cleanup-model-select") as HTMLSelectElement;
 const saveBtn = document.getElementById("save-btn")!;
@@ -75,6 +78,7 @@ async function loadConfig() {
   }
   asrModelSelect.value = currentConfig.asr_model;
 
+  asrDeviceSelect.value = currentConfig.asr_device;
   cleanupModeSelect.value = currentConfig.cleanup_mode;
 
   await refreshOllamaModels();
@@ -84,6 +88,7 @@ async function saveConfig() {
   const newConfig: Config = {
     ...currentConfig,
     asr_model: asrModelSelect.value,
+    asr_device: asrDeviceSelect.value,
     cleanup_mode: cleanupModeSelect.value,
     cleanup_model: cleanupModelSelect.value,
   };
@@ -110,11 +115,11 @@ async function init() {
     setStatus(event.payload);
   });
 
-  await listen<{ text: string; asr_ms: number; cleanup_ms: number | null }>("transcription-result", (event) => {
-    const { text, asr_ms, cleanup_ms } = event.payload;
+  await listen<{ text: string; asr_device: string; asr_ms: number; cleanup_ms: number | null }>("transcription-result", (event) => {
+    const { text, asr_device, asr_ms, cleanup_ms } = event.payload;
     const asrStr = (asr_ms / 1000).toFixed(1);
     const llmStr = cleanup_ms != null ? (cleanup_ms / 1000).toFixed(1) + "s" : "\u2014";
-    rawTranscript.innerHTML = `<div class="timing">ASR ${asrStr}s | LLM ${llmStr}</div>${text}`;
+    rawTranscript.innerHTML = `<div class="timing">${asr_device} ASR ${asrStr}s | LLM ${llmStr}</div>${text}`;
   });
 
   await listen<string>("error", (event) => {

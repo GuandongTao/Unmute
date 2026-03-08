@@ -6,7 +6,9 @@ use std::path::PathBuf;
 pub struct Config {
     pub asr_model: String,
     pub asr_language: String,
+    pub asr_device: AsrDevice,
     pub whisper_path: String,
+    pub whisper_gpu_path: String,
     pub models_dir: String,
     pub cleanup_mode: CleanupMode,
     pub cleanup_device: CleanupDevice,
@@ -14,6 +16,13 @@ pub struct Config {
     pub ollama_url: String,
     pub auto_paste: bool,
     pub max_recording_secs: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum AsrDevice {
+    Cpu,
+    Gpu,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -36,7 +45,9 @@ impl Default for Config {
         Self {
             asr_model: "small.en".to_string(),
             asr_language: "en".to_string(),
+            asr_device: AsrDevice::Cpu,
             whisper_path: String::new(),
+            whisper_gpu_path: String::new(),
             models_dir: String::new(),
             cleanup_mode: CleanupMode::Off,
             cleanup_device: CleanupDevice::Gpu,
