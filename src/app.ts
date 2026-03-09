@@ -24,6 +24,7 @@ const asrModelSelect = document.getElementById("asr-model-select") as HTMLSelect
 const asrDeviceSelect = document.getElementById("asr-device-select") as HTMLSelectElement;
 const cleanupModeSelect = document.getElementById("cleanup-mode-select") as HTMLSelectElement;
 const cleanupModelSelect = document.getElementById("cleanup-model-select") as HTMLSelectElement;
+const copyBtn = document.getElementById("copy-btn")!;
 const saveBtn = document.getElementById("save-btn")!;
 const saveStatus = document.getElementById("save-status")!;
 
@@ -117,6 +118,19 @@ async function saveConfig() {
 
 async function init() {
   await loadConfig();
+
+  copyBtn.addEventListener("click", async () => {
+    const text = rawTranscript.textContent || "";
+    if (!text || text === "\u2014") return;
+    try {
+      await navigator.clipboard.writeText(text);
+      copyBtn.textContent = "Copied!";
+      setTimeout(() => { copyBtn.textContent = "Copy"; }, 1500);
+    } catch {
+      copyBtn.textContent = "Failed";
+      setTimeout(() => { copyBtn.textContent = "Copy"; }, 1500);
+    }
+  });
 
   saveBtn.addEventListener("click", saveConfig);
   cleanupModelSelect.addEventListener("focus", refreshOllamaModels);

@@ -51,6 +51,28 @@ body {
   font-size: 12px;
 }
 
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+#copy-btn {
+  background: transparent;
+  color: #718096;
+  border: 1px solid #2d3748;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+#copy-btn:hover {
+  color: #e0e0e0;
+  border-color: #4ade80;
+}
+
 #transcript-section h3,
 #settings-section h3 {
   font-size: 11px;
