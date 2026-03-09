@@ -1,6 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::process::Command;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 /// Remove whisper special tokens like <|endoftext|>, <|startoftranscript|>, etc.
 fn strip_special_tokens(text: &str) -> String {
@@ -52,7 +57,11 @@ impl WhisperEngine {
 
         // Check common names in PATH
         for name in &["whisper-cli", "whisper-cpp", "main"] {
-            if let Ok(output) = Command::new("where").arg(name).output() {
+            let mut cmd = Command::new("where");
+            cmd.arg(name);
+            #[cfg(target_os = "windows")]
+            cmd.creation_flags(CREATE_NO_WINDOW);
+            if let Ok(output) = cmd.output() {
                 if output.status.success() {
                     let path = String::from_utf8_lossy(&output.stdout)
                         .lines()
@@ -118,6 +127,8 @@ impl WhisperEngine {
         }
 
         let mut cmd = Command::new(binary_path);
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(CREATE_NO_WINDOW);
         cmd.arg("-m").arg(&self.model_path)
             .arg("-f").arg(audio_path)
             .arg("--no-timestamps")

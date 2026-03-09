@@ -1,6 +1,9 @@
 use std::process::Command;
-use std::thread;
-use std::time::Duration;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 /// Paste text into the currently focused application.
 /// Strategy: save clipboard → set text → simulate Ctrl+V → restore clipboard
@@ -62,9 +65,11 @@ if ($savedFormat -eq 'image' -and $savedClip -ne $null) {{
         text = escaped
     );
 
-    let output = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-STA", "-Command", &full_script])
-        .output()
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-NonInteractive", "-STA", "-Command", &full_script]);
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let output = cmd.output()
         .map_err(|e| format!("Failed to paste: {}", e))?;
 
     if !output.status.success() {

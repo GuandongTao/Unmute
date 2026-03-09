@@ -14,6 +14,11 @@ use config::{CleanupMode, Config};
 use hotkey::HotkeyEvent;
 use std::sync::Arc;
 use std::sync::Mutex;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
@@ -382,12 +387,14 @@ fn ensure_ollama(config: &Config) {
         ];
         for path in &ollama_paths {
             if path.exists() {
-                match std::process::Command::new(path)
-                    .arg("serve")
+                let mut ollama_cmd = std::process::Command::new(path);
+                ollama_cmd.arg("serve")
                     .stdin(std::process::Stdio::null())
                     .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .spawn()
+                    .stderr(std::process::Stdio::null());
+                #[cfg(target_os = "windows")]
+                ollama_cmd.creation_flags(CREATE_NO_WINDOW);
+                match ollama_cmd.spawn()
                 {
                     Ok(_) => {
                         log::info!("Started Ollama from {:?}", path);
