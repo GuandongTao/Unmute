@@ -8,6 +8,7 @@ mod config;
 mod hotkey;
 mod logger;
 mod paste;
+mod setup;
 
 use audio::AudioState;
 use config::{CleanupMode, Config};
@@ -362,6 +363,43 @@ async fn process_recording(state: &Arc<AppState>) -> Result<ProcessResult, Strin
     })
 }
 
+#[tauri::command]
+fn check_setup(state: tauri::State<'_, Arc<AppState>>) -> setup::SetupStatus {
+    let config = state.config.lock().unwrap();
+    setup::check(&config.asr_model)
+}
+
+#[tauri::command]
+async fn run_setup(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+    include_cuda: bool,
+) -> Result<(), String> {
+    let model = {
+        state.config.lock().unwrap().asr_model.clone()
+    };
+
+    setup::run(&app, &model, include_cuda).await?;
+
+    // Update config with installed paths
+    let mut config = state.config.lock().unwrap();
+    config.whisper_path = setup::bin_dir()
+        .join("whisper-cli.exe")
+        .to_string_lossy()
+        .to_string();
+    if include_cuda && setup::gpu_bin_dir().join("whisper-cli.exe").exists() {
+        config.whisper_gpu_path = setup::gpu_bin_dir()
+            .join("whisper-cli.exe")
+            .to_string_lossy()
+            .to_string();
+        config.asr_device = config::AsrDevice::Gpu;
+    }
+    config.models_dir = setup::models_dir().to_string_lossy().to_string();
+    config.save()?;
+
+    Ok(())
+}
+
 /// Ensure Ollama is running, start it if not.
 fn ensure_ollama(config: &Config) {
     if config.cleanup_mode == CleanupMode::Off {
@@ -572,7 +610,7 @@ fn main() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_config, update_config, get_status, list_models, list_ollama_models])
+        .invoke_handler(tauri::generate_handler![get_config, update_config, get_status, list_models, list_ollama_models, check_setup, run_setup])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

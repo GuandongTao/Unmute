@@ -7,18 +7,43 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div id="app">
+  <div id="setup-screen" style="display: none;">
+    <div id="setup-content">
+      <h2>Welcome to Unmute</h2>
+      <p>Download the speech recognition engine and model to get started.</p>
+
+      <div id="setup-items">
+        <div class="setup-item">
+          <span>Speech engine (CPU)</span>
+          <span class="setup-size">~15 MB</span>
+        </div>
+        <div class="setup-item">
+          <label><input type="checkbox" id="cuda-check" checked> Speech engine (NVIDIA GPU)</label>
+          <span class="setup-size">~200 MB</span>
+        </div>
+        <div class="setup-item">
+          <span>Language model (large-v3-turbo)</span>
+          <span class="setup-size">~1.6 GB</span>
+        </div>
+      </div>
+
+      <div id="setup-progress" style="display: none;">
+        <div id="setup-status-text">Preparing...</div>
+        <div id="progress-bar-bg">
+          <div id="progress-bar-fill"></div>
+        </div>
+        <div id="progress-detail"></div>
+      </div>
+
+      <button id="setup-btn">Download &amp; Set Up</button>
+      <div id="setup-error" style="display: none;"></div>
+    </div>
+  </div>
+
+  <div id="app" style="display: none;">
     <div id="status-section">
       <div id="status-indicator" class="idle"></div>
       <span id="status-text">Idle</span>
-    </div>
-
-    <div id="transcript-section">
-      <div class="section-header">
-        <h3>Latest Transcript</h3>
-        <button id="copy-btn" title="Copy transcript">Copy</button>
-      </div>
-      <div id="raw-transcript" class="transcript-box">&mdash;</div>
     </div>
 
     <div id="settings-section">
@@ -51,7 +76,6 @@
         <select id="cleanup-model-select"></select>
       </div>
 
-
       <button id="save-btn">Save Settings</button>
       <span id="save-status"></span>
     </div>
@@ -59,6 +83,11 @@
     <div id="info-section">
       <div class="info-row"><span>Hold:</span> <span>Left Alt + Right Ctrl</span></div>
       <div class="info-row"><span>Toggle:</span> <span>Left Alt + Right Ctrl + Right Shift</span></div>
+    </div>
+
+    <div id="transcript-section">
+      <h3>Transcript History</h3>
+      <div id="transcript-list"></div>
     </div>
   </div>
 

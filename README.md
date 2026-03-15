@@ -104,8 +104,10 @@ If ASR is set to GPU mode but the CUDA build fails (wrong GPU, missing driver, e
 | Cleanup Mode | Output language | Behavior |
 |---|---|---|
 | **Off** | Original (mixed EN/CN) | Raw whisper output, no LLM processing |
-| **Light** | English | Fix punctuation/fillers, translate to English |
-| **Rewrite** | English | Restructure for clarity, translate to English |
+| **Light** | Original or English | Fix punctuation/fillers; translates to English only if `translate_to_english` is enabled |
+| **Rewrite** | English | Restructure for clarity, always translates to English |
+
+> **Note:** LLM cleanup treats input strictly as a speech transcript — it will clean up spoken questions or instructions rather than answering them.
 
 ## Development
 

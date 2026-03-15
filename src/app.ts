@@ -17,18 +17,155 @@ interface Config {
   max_recording_secs: number;
 }
 
+interface SetupStatus {
+  has_whisper_cpu: boolean;
+  has_whisper_gpu: boolean;
+  has_model: boolean;
+  model_name: string;
+  needs_setup: boolean;
+}
+
+// --- Setup screen elements ---
+const setupScreen = document.getElementById("setup-screen")!;
+const setupBtn = document.getElementById("setup-btn")!;
+const setupProgress = document.getElementById("setup-progress")!;
+const setupStatusText = document.getElementById("setup-status-text")!;
+const progressBarFill = document.getElementById("progress-bar-fill")!;
+const progressDetail = document.getElementById("progress-detail")!;
+const setupError = document.getElementById("setup-error")!;
+const cudaCheck = document.getElementById("cuda-check") as HTMLInputElement;
+
+// --- Main app elements ---
+const appDiv = document.getElementById("app")!;
 const statusIndicator = document.getElementById("status-indicator")!;
 const statusText = document.getElementById("status-text")!;
-const rawTranscript = document.getElementById("raw-transcript")!;
+const transcriptList = document.getElementById("transcript-list")!;
 const asrModelSelect = document.getElementById("asr-model-select") as HTMLSelectElement;
 const asrDeviceSelect = document.getElementById("asr-device-select") as HTMLSelectElement;
 const cleanupModeSelect = document.getElementById("cleanup-mode-select") as HTMLSelectElement;
 const cleanupModelSelect = document.getElementById("cleanup-model-select") as HTMLSelectElement;
-const copyBtn = document.getElementById("copy-btn")!;
 const saveBtn = document.getElementById("save-btn")!;
 const saveStatus = document.getElementById("save-status")!;
 
+const MAX_HISTORY = 5;
+
+interface TranscriptEntry {
+  text: string;
+  timing: string;
+}
+
+const history: TranscriptEntry[] = [];
+
 let currentConfig: Config;
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + " KB";
+  if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+}
+
+// ========================
+// Setup flow
+// ========================
+
+async function checkAndShowSetup() {
+  const status = await invoke<SetupStatus>("check_setup");
+
+  if (status.needs_setup) {
+    setupScreen.style.display = "flex";
+    appDiv.style.display = "none";
+
+    setupBtn.addEventListener("click", () => startSetup());
+
+    // Listen for progress events
+    await listen<{ step: string; downloaded: number; total: number }>("setup-progress", (event) => {
+      const { downloaded, total } = event.payload;
+      if (total > 0) {
+        const pct = Math.round((downloaded / total) * 100);
+        progressBarFill.style.width = pct + "%";
+        progressDetail.textContent = `${formatBytes(downloaded)} / ${formatBytes(total)} (${pct}%)`;
+      }
+    });
+
+    await listen<string>("setup-status", (event) => {
+      setupStatusText.textContent = event.payload;
+    });
+  } else {
+    setupScreen.style.display = "none";
+    appDiv.style.display = "flex";
+    await initApp();
+  }
+}
+
+async function startSetup() {
+  setupBtn.style.display = "none";
+  setupProgress.style.display = "block";
+  setupError.style.display = "none";
+
+  const includeCuda = cudaCheck.checked;
+
+  try {
+    await invoke("run_setup", { includeCuda });
+    // Setup done — switch to main app
+    setupScreen.style.display = "none";
+    appDiv.style.display = "flex";
+    await initApp();
+  } catch (e) {
+    setupError.textContent = `Setup failed: ${e}`;
+    setupError.style.display = "block";
+    setupBtn.style.display = "block";
+    setupBtn.textContent = "Retry";
+  }
+}
+
+// ========================
+// Main app
+// ========================
+
+function renderHistory() {
+  transcriptList.innerHTML = "";
+  if (history.length === 0) {
+    transcriptList.innerHTML = '<div class="transcript-entry transcript-empty">\u2014</div>';
+    return;
+  }
+  for (let i = 0; i < history.length; i++) {
+    const entry = history[i];
+    const div = document.createElement("div");
+    div.className = "transcript-entry" + (i === 0 ? " latest" : " older");
+
+    const timingDiv = document.createElement("div");
+    timingDiv.className = "timing";
+    timingDiv.textContent = entry.timing;
+
+    const textSpan = document.createElement("span");
+    textSpan.className = "transcript-text";
+    textSpan.textContent = entry.text;
+
+    const copyBtn = document.createElement("button");
+    copyBtn.className = "copy-entry-btn";
+    copyBtn.textContent = "Copy";
+    copyBtn.title = "Copy transcript";
+    copyBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(entry.text);
+        copyBtn.textContent = "Copied!";
+        setTimeout(() => { copyBtn.textContent = "Copy"; }, 1500);
+      } catch {
+        copyBtn.textContent = "Failed";
+        setTimeout(() => { copyBtn.textContent = "Copy"; }, 1500);
+      }
+    });
+
+    const header = document.createElement("div");
+    header.className = "transcript-header";
+    header.appendChild(timingDiv);
+    header.appendChild(copyBtn);
+
+    div.appendChild(header);
+    div.appendChild(textSpan);
+    transcriptList.appendChild(div);
+  }
+}
 
 function formatModelLabel(model: string): string {
   if (model.endsWith(".en")) {
@@ -51,7 +188,6 @@ async function refreshOllamaModels() {
   } catch {
     // Ollama not running
   }
-  // Ensure current/selected model is in the list
   if (selected && !Array.from(cleanupModelSelect.options).some(o => o.value === selected)) {
     const opt = document.createElement("option");
     opt.value = selected;
@@ -69,7 +205,6 @@ function setStatus(status: string) {
 async function loadConfig() {
   currentConfig = await invoke<Config>("get_config");
 
-  // Populate model dropdown with language annotations
   const models = await invoke<string[]>("list_models");
   asrModelSelect.innerHTML = "";
   for (const model of models) {
@@ -78,7 +213,6 @@ async function loadConfig() {
     opt.textContent = formatModelLabel(model);
     asrModelSelect.appendChild(opt);
   }
-  // If current model not in list, add it
   if (!models.includes(currentConfig.asr_model)) {
     const opt = document.createElement("option");
     opt.value = currentConfig.asr_model;
@@ -116,21 +250,10 @@ async function saveConfig() {
   }
 }
 
-async function init() {
+async function initApp() {
   await loadConfig();
 
-  copyBtn.addEventListener("click", async () => {
-    const text = rawTranscript.textContent || "";
-    if (!text || text === "\u2014") return;
-    try {
-      await navigator.clipboard.writeText(text);
-      copyBtn.textContent = "Copied!";
-      setTimeout(() => { copyBtn.textContent = "Copy"; }, 1500);
-    } catch {
-      copyBtn.textContent = "Failed";
-      setTimeout(() => { copyBtn.textContent = "Copy"; }, 1500);
-    }
-  });
+  renderHistory();
 
   saveBtn.addEventListener("click", saveConfig);
   cleanupModelSelect.addEventListener("focus", refreshOllamaModels);
@@ -143,13 +266,16 @@ async function init() {
     const { text, asr_device, asr_ms, cleanup_ms } = event.payload;
     const asrStr = (asr_ms / 1000).toFixed(1);
     const llmStr = cleanup_ms != null ? (cleanup_ms / 1000).toFixed(1) + "s" : "\u2014";
-    rawTranscript.innerHTML = `<div class="timing">${asr_device} ASR ${asrStr}s | LLM ${llmStr}</div>${text}`;
+    const timing = `${asr_device} ASR ${asrStr}s | LLM ${llmStr}`;
+    history.unshift({ text, timing });
+    if (history.length > MAX_HISTORY) history.pop();
+    renderHistory();
   });
 
   await listen<string>("error", (event) => {
-    rawTranscript.textContent = `Error: ${event.payload}`;
     console.error("Unmute error:", event.payload);
   });
 }
 
-init();
+// Entry point: check setup first, then show app or setup screen
+checkAndShowSetup();
